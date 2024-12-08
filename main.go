@@ -35,6 +35,8 @@ type ScraperService struct {
 	maxPages     int
 	outputDir    string
 	headers      *Headers
+	startYear    int
+	endYear      int
 }
 
 func NewScraperService() *ScraperService {
@@ -65,6 +67,8 @@ func NewScraperService() *ScraperService {
 				"Page",
 			},
 		},
+		startYear: 2000,
+		endYear:   2024,
 	}
 }
 
@@ -172,8 +176,9 @@ func (s *ScraperService) writeHeaders(writer *csv.Writer, headers *Headers) {
 	}
 }
 
-func (s *ScraperService) constructURL(term string, page int, lang string, sdt string) string {
-	return fmt.Sprintf("%s?start=%d&q=%s&hl=%s&as_sdt=%s", s.baseUrl, page*10, term, lang, sdt)
+func (s *ScraperService) constructURL(term string, page int, lang string, sdt string, fromYear, toYear int) string {
+	return fmt.Sprintf("%s?start=%d&q=%s&hl=%s&as_sdt=%s&as_ylo=%d&as_yhi=%d",
+		s.baseUrl, page*10, term, lang, sdt, fromYear, toYear)
 }
 
 func (s *ScraperService) createOutputFile(term string) (*os.File, string) {
@@ -275,18 +280,26 @@ func main() {
 	service := NewScraperService()
 	term, lang, sdt, slowMode := service.flags()
 
-	page := 0
-	url := service.constructURL(term, page, lang, sdt)
-	log.Printf("Scraping URL: %s", url)
+	periodSize := 5
+	for startYear := service.startYear; startYear <= service.endYear; startYear += periodSize {
+		endYear := startYear + periodSize - 1
+		if endYear > service.endYear {
+			endYear = service.endYear
+		}
 
-	file, fileName := service.createOutputFile(term)
-	writer := csv.NewWriter(file)
-	defer file.Close()
+		page := 0
+		url := service.constructURL(term, page, lang, sdt, startYear, endYear)
+		log.Printf("Scraping period %d-%d: %s", startYear, endYear, url)
 
-	service.writeHeaders(writer, service.headers)
-	collector := service.createCollector(slowMode)
+		file, _ := service.createOutputFile(fmt.Sprintf("%s-%d-%d", term, startYear, endYear))
+		writer := csv.NewWriter(file)
 
-	service.Scrape(collector, writer, url, term, &page, service.maxPages)
+		service.writeHeaders(writer, service.headers)
+		collector := service.createCollector(slowMode)
 
-	log.Printf("Scrape complete. It navigated through %d pages. The results were saved to a CSV file: %s\n", page, fileName)
+		service.Scrape(collector, writer, url, term, &page, service.maxPages)
+
+		file.Close()
+		time.Sleep(getBaseDelay(slowMode))
+	}
 }
